@@ -1,5 +1,4 @@
 import random
-
 import bs4.element
 import requests
 import json
@@ -13,9 +12,15 @@ import pandas as pd
 # 爬取当当网商品评论的爬虫
 class DDCmt_Crawler:
     def __init__(self, file_path: str, proxy=True):
+        """
+        :param file_path: 保存路径
+        :param proxy: 是否启用代理
+        """
+        # 初始化Excel写入
         assert os.path.exists(file_path) is True
         self.writer = pd.ExcelWriter(file_path, mode='a', if_sheet_exists='new',
                                      datetime_formatstr='YYYY-MM-DD HH:MM:SS')
+        # 都是和代理有关的设置
         self.proxies_list = []
         self.batch_size = 5
         self.min_proxies_num = 2
@@ -25,6 +30,14 @@ class DDCmt_Crawler:
         self.proxy = proxy
 
     def crawl_product(self, product_id, start=1, end=201, c_list=None):
+        """
+        爬取主函数
+        :param product_id: 商品id
+        :param start: 开始页面
+        :param end: 结束页面
+        :param c_list: 列表，遍历列表中指定的页面。若此项有值，则优先使用此项。
+        :return: None
+        """
         headers = {
             'host': "product.dangdang.com",
             'Referer': fr"http://product.dangdang.com/{product_id}.html",
@@ -38,27 +51,25 @@ class DDCmt_Crawler:
             'filterType': 1,  # 全爬完，不过滤
         }
         url = r"http://product.dangdang.com/index.php?r=comment%2Flist"
-        # self.get_proxy(5)
 
         c_iter = c_list if c_list is not None else range(start, end)
         for page in tqdm(c_iter):
             # 爬取
             params['pageIndex'] = page
-            proxies = self.get_cur_proxy()
-            # print(proxies)
-            data = self.get(url, headers, params, proxies)
+            proxies = self.get_cur_proxy()  # 获取一个代理
+            data = self.get(url, headers, params, proxies)  # 获取页面
             if data is None:  # 爬取失败
-                self.blame_proxy(proxies)
+                self.blame_proxy(proxies)  # 将代理可信度降低
                 continue
             # 解析
-            result = self.parse_page(data)
+            result = self.parse_page(data)  # 解析页面
             if result is None:  # 解析到结尾
-                print("正常?")
+                print("正常结束")
                 break
             # 保存
             result_df = pd.DataFrame(result)
             result_df.to_excel(self.writer, index=False, header=True)
-            # 等待 0~3s
+            # 随机等待 0~3s
             time.sleep(random.random() * 3)
         else:
             print("正常结束")
@@ -91,7 +102,6 @@ class DDCmt_Crawler:
             'name': name,
             'level': level,
             'yg': 0 if yg is None else 1,
-            # 'time': time.strptime(cmt_time, "%Y-%m-%d %H:%M:%S"),
             'time': cmt_time,
             'pic': 0 if pic is None else len(pic.find_all('li')),
         }
@@ -105,10 +115,11 @@ class DDCmt_Crawler:
         return [self.parse_item(cmt) for cmt in cmt_list]
 
     def get_proxy(self, num):
+        # 使用讯代理提供的收费HTTP/HTTPS代理
         url = r"http://api.xdaili.cn/xdaili-api/greatRecharge/getGreatIp"
         param = {
-            'spiderId': "",
-            'orderno': "",
+            'spiderId': "账户号",
+            'orderno': "订单号",
             'returnType': 2,
             'count': num
         }
@@ -124,15 +135,20 @@ class DDCmt_Crawler:
         print(f"get proxy: {num}")
 
     def get_cur_proxy(self):
+        # 假如不启用代理，返回空
         if self.proxy is False:
             return None
+        # 假如代理池内有效代理数太少，则补充一个batch的代理
+        # 否则从代理池内随机选择一个作为当前代理
         if len(self.proxies_list) <= self.min_proxies_num:
             self.get_proxy(self.batch_size)
         return random.choice(self.proxies_list)
 
     def blame_proxy(self, proxies):
+        # 假如不启用代理，不做任何事
         if self.proxy is False:
             return
+        # 降低此代理可信度，假如超过极限，则从代理池中删除
         key = proxies['http']
         self.proxies_blame[key] += 1
         if self.proxies_blame[key] >= self.blame_limit:
